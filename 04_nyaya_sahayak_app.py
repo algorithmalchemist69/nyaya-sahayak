@@ -275,6 +275,31 @@ def main():
                 st.success("Explanation:")
                 st.markdown(result)
 
+                if multilingual and sarvam_key:
+                    with st.spinner("Computing BhashaBench score …"):
+                        lang_score, sem_score, composite, detected = bhasha_bench_score(
+                            result, lang_choice, lang_code,
+                            english_ref=legal_input.strip(),
+                            sarvam_key=sarvam_key,
+                        )
+                    st.subheader("📊 BhashaBench Score")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric(
+                        "Language Detection",
+                        f"{lang_score * 100:.0f} / 100",
+                        help=f"Detected: {detected} · Expected: {LANGDETECT_CODES.get(lang_choice, '?')}",
+                    )
+                    c2.metric(
+                        "Semantic Fidelity",
+                        f"{sem_score * 100:.1f} / 100",
+                        help="Round-trip cosine similarity with original legal text via Sarvam AI",
+                    )
+                    c3.metric(
+                        "BhashaBench Score",
+                        f"{composite} / 100",
+                        help="Composite: 50% language detection + 50% semantic fidelity",
+                    )
+
     # ── Tab 2 ─────────────────────────────────────────────────────────────────
     with tab2:
         st.subheader("FIR Category Helper")

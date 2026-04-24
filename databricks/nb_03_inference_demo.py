@@ -16,7 +16,7 @@
 
 # COMMAND ----------
 
-%pip install faiss-cpu sentence-transformers "numpy<2.0" requests --quiet
+%pip install faiss-cpu sentence-transformers "numpy<2.0" requests langdetect --quiet
 
 # COMMAND ----------
 
@@ -50,6 +50,12 @@ LANGUAGES = {
     "Odia":      "or-IN",
 }
 
+LANGDETECT_CODES = {
+    "Hindi": "hi", "Tamil": "ta", "Telugu": "te", "Kannada": "kn",
+    "Malayalam": "ml", "Bengali": "bn", "Marathi": "mr",
+    "Gujarati": "gu", "Punjabi": "pa", "Odia": "or",
+}
+
 OFFENSE_HINTS = {
     "Theft":             "Chapter 17 — BNS Sections 303-305",
     "Robbery":           "Chapter 17 — BNS Sections 309-311",
@@ -76,6 +82,7 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 from mlflow.deployments import get_deploy_client
+from langdetect import detect, LangDetectException
 
 embed_model = SentenceTransformer(EMBED_MODEL)
 index = faiss.read_index(INDEX_PATH)
@@ -116,26 +123,78 @@ def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> st
     return response["choices"][0]["message"]["content"]
 
 
-def translate_input(text: str, src: str, key: str) -> str:
-    """Translate only short user input to English using Sarvam AI."""
-    if src == "en-IN" or not text.strip() or not key:
+def translate_text(text: str, src: str, tgt: str, key: str) -> str:
+    """Translate text via Sarvam AI, chunking into ≤900-char pieces."""
+    if src == tgt or not text.strip() or not key:
         return text
-    r = requests.post(
-        SARVAM_URL,
-        headers={"api-subscription-key": key},
-        json={
-            "input": text[:900],
-            "source_language_code": src,
-            "target_language_code": "en-IN",
-            "speaker_gender": "Female",
-            "mode": "formal",
-            "model": "mayura:v1",
-            "enable_preprocessing": True,
-        },
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json().get("translated_text", text)
+    paragraphs = text.split("\n")
+    chunks, current = [], ""
+    for para in paragraphs:
+        if len(current) + len(para) + 1 > 900:
+            if current:
+                chunks.append(current.strip())
+            current = para
+        else:
+            current = (current + "\n" + para) if current else para
+    if current:
+        chunks.append(current.strip())
+
+    translated = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        r = requests.post(
+            SARVAM_URL,
+            headers={"api-subscription-key": key},
+            json={
+                "input": chunk,
+                "source_language_code": src,
+                "target_language_code": tgt,
+                "speaker_gender": "Female",
+                "mode": "formal",
+                "model": "mayura:v1",
+                "enable_preprocessing": True,
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        translated.append(r.json().get("translated_text", chunk))
+    return "\n".join(translated)
+
+
+def translate_input(text: str, src: str, key: str) -> str:
+    return translate_text(text, src, "en-IN", key)
+
+
+def bhasha_bench_score(output: str, lang_name: str, lang_code: str,
+                       english_ref: str, sarvam_key: str) -> dict:
+    """Compute BhashaBench metrics for a non-English LLM output."""
+    expected = LANGDETECT_CODES.get(lang_name, "")
+    try:
+        detected = detect(output)
+        lang_score = 1.0 if detected == expected else 0.0
+    except LangDetectException:
+        detected = "unknown"
+        lang_score = 0.0
+
+    try:
+        back_en = translate_text(output, lang_code, "en-IN", sarvam_key)
+        v_ref  = embed_model.encode([english_ref], normalize_embeddings=True).astype(np.float32)
+        v_back = embed_model.encode([back_en],     normalize_embeddings=True).astype(np.float32)
+        sem_score = float(np.dot(v_ref, v_back.T).squeeze())
+        sem_score = max(0.0, min(1.0, sem_score))
+    except Exception as e:
+        print(f"Semantic scoring error: {e}")
+        sem_score = 0.0
+
+    composite = round((0.5 * lang_score + 0.5 * sem_score) * 100, 1)
+    return {
+        "language_detection": round(lang_score * 100),
+        "semantic_fidelity":  round(sem_score * 100, 1),
+        "composite":          composite,
+        "detected_lang":      detected,
+        "expected_lang":      expected,
+    }
 
 # COMMAND ----------
 
@@ -176,6 +235,31 @@ simplified = call_llm(
     user_prompt=f"Explain simply:\n\n{legal_text}",
 )
 
+bb1 = {}
+if lang_name != "English" and sarvam_key:
+    bb1 = bhasha_bench_score(simplified, lang_name, lang_code, legal_text, sarvam_key)
+
+bb1_html = ""
+if bb1:
+    bb1_html = f"""
+  <hr style="border:none;border-top:1px solid #c5d8f8;margin:16px 0;"/>
+  <h4 style="color:#1976d2;margin:0 0 10px;">📊 BhashaBench Score</h4>
+  <div style="display:flex;gap:16px;">
+    <div style="background:#e3f2fd;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
+      <div style="font-size:22px;font-weight:bold;color:#1565c0;">{bb1['language_detection']} / 100</div>
+      <div style="font-size:12px;color:#555;margin-top:4px;">Language Detection<br/><small>detected: {bb1['detected_lang']} · expected: {bb1['expected_lang']}</small></div>
+    </div>
+    <div style="background:#e3f2fd;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
+      <div style="font-size:22px;font-weight:bold;color:#1565c0;">{bb1['semantic_fidelity']} / 100</div>
+      <div style="font-size:12px;color:#555;margin-top:4px;">Semantic Fidelity<br/><small>round-trip cosine similarity</small></div>
+    </div>
+    <div style="background:#1976d2;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
+      <div style="font-size:22px;font-weight:bold;color:#fff;">{bb1['composite']} / 100</div>
+      <div style="font-size:12px;color:#bbdefb;margin-top:4px;">BhashaBench Score<br/><small>composite (50% + 50%)</small></div>
+    </div>
+  </div>
+"""
+
 displayHTML(f"""
 <div style="font-family:sans-serif; max-width:700px; padding:20px;
             border-left:4px solid #1976d2; background:#f5f9ff; border-radius:6px;">
@@ -183,6 +267,7 @@ displayHTML(f"""
   <p style="font-size:13px;color:#555;">Original: <em>{legal_text[:120]}…</em></p>
   <hr/>
   <div style="white-space:pre-wrap; font-size:15px; line-height:1.6;">{simplified}</div>
+  {bb1_html}
 </div>
 """)
 
@@ -229,6 +314,32 @@ retrieved_html = "".join(
     for r in sections
 )
 
+bb2 = {}
+if lang_name != "English" and sarvam_key:
+    english_ref2 = f"Incident: {english_incident}\n\n{sections_text}"
+    bb2 = bhasha_bench_score(guidance, lang_name, lang_code, english_ref2, sarvam_key)
+
+bb2_html = ""
+if bb2:
+    bb2_html = f"""
+  <hr style="border:none;border-top:1px solid #c8e6c9;margin:16px 0;"/>
+  <h4 style="color:#388e3c;margin:0 0 10px;">📊 BhashaBench Score</h4>
+  <div style="display:flex;gap:16px;">
+    <div style="background:#f1f8e9;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
+      <div style="font-size:22px;font-weight:bold;color:#2e7d32;">{bb2['language_detection']} / 100</div>
+      <div style="font-size:12px;color:#555;margin-top:4px;">Language Detection<br/><small>detected: {bb2['detected_lang']} · expected: {bb2['expected_lang']}</small></div>
+    </div>
+    <div style="background:#f1f8e9;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
+      <div style="font-size:22px;font-weight:bold;color:#2e7d32;">{bb2['semantic_fidelity']} / 100</div>
+      <div style="font-size:12px;color:#555;margin-top:4px;">Semantic Fidelity<br/><small>round-trip cosine similarity</small></div>
+    </div>
+    <div style="background:#388e3c;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
+      <div style="font-size:22px;font-weight:bold;color:#fff;">{bb2['composite']} / 100</div>
+      <div style="font-size:12px;color:#c8e6c9;margin-top:4px;">BhashaBench Score<br/><small>composite (50% + 50%)</small></div>
+    </div>
+  </div>
+"""
+
 displayHTML(f"""
 <div style="font-family:sans-serif; max-width:800px;">
   <div style="background:#fff3e0; padding:16px; border-left:4px solid #f57c00; border-radius:6px; margin-bottom:16px;">
@@ -253,6 +364,7 @@ displayHTML(f"""
   <div style="background:#e8f5e9; padding:20px; border-left:4px solid #388e3c; border-radius:6px;">
     <h3 style="color:#388e3c; margin-top:0;">🚨 FIR Guidance ({lang_name})</h3>
     <div style="white-space:pre-wrap; font-size:15px; line-height:1.7;">{guidance}</div>
+    {bb2_html}
     <hr style="border:none; border-top:1px solid #c8e6c9; margin:16px 0;"/>
     <small style="color:#666;">
       ⚠️ AI-generated guidance for informational purposes only.

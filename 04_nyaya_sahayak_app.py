@@ -83,26 +83,46 @@ def get_llm_client(token: str):
 
 # ── Sarvam translation ────────────────────────────────────────────────────────
 
-def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
-    """Translate text using Sarvam AI. Returns original text if src == tgt."""
-    if src == tgt or not text.strip():
-        return text
+def _translate_chunk(chunk: str, src: str, tgt: str, sarvam_key: str) -> str:
+    """Translate a single chunk (≤900 chars) via Sarvam AI."""
     response = requests.post(
         SARVAM_API_URL,
         headers={"api-subscription-key": sarvam_key},
         json={
-            "input":                  text,
-            "source_language_code":   src,
-            "target_language_code":   tgt,
-            "speaker_gender":         "Female",
-            "mode":                   "formal",
-            "model":                  "mayura:v1",
-            "enable_preprocessing":   True,
+            "input":                chunk,
+            "source_language_code": src,
+            "target_language_code": tgt,
+            "speaker_gender":       "Female",
+            "mode":                 "formal",
+            "model":                "mayura:v1",
+            "enable_preprocessing": True,
         },
         timeout=30,
     )
     response.raise_for_status()
-    return response.json().get("translated_text", text)
+    return response.json().get("translated_text", chunk)
+
+
+def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
+    """Translate text using Sarvam AI, splitting into chunks if needed."""
+    if src == tgt or not text.strip():
+        return text
+
+    # Split into paragraphs and batch into ≤900-char chunks
+    paragraphs = text.split("\n")
+    chunks, current = [], ""
+    for para in paragraphs:
+        if len(current) + len(para) + 1 > 900:
+            if current:
+                chunks.append(current.strip())
+            current = para
+        else:
+            current = (current + "\n" + para) if current else para
+    if current:
+        chunks.append(current.strip())
+
+    translated_chunks = [_translate_chunk(c, src, tgt, sarvam_key) for c in chunks if c]
+    return "\n".join(translated_chunks)
 
 
 # ── Retrieval ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # ⚖️ Nyaya-Sahayak: Governance & Access to Justice
 
-**Nyaya-Sahayak** is an AI-powered legal assistant that simplifies Indian law (BNS 2023) for common citizens and helps them identify the correct FIR sections for any incident — built entirely on open-source models and Databricks.
+Nyaya-Sahayak is an AI-powered legal assistant that simplifies Indian law (BNS 2023) for common citizens and helps them identify the correct FIR sections for any incident — in their own language. Built entirely on open-source models and Databricks.
 
 ---
 
@@ -14,21 +14,23 @@ flowchart TD
     B -->|collect to driver| E[SentenceTransformer\nall-MiniLM-L6-v2\nEmbeddings]
     E -->|358 vectors × 384 dims| F[(FAISS Index\nIndexFlatIP\ncosine similarity)]
 
-    G[User: describes incident\nor pastes legal text] --> H[Streamlit App]
-    H -->|encode query| E2[SentenceTransformer\nQuery Embedding]
-    E2 -->|top-k search| F
-    F -->|retrieved BNS sections| I[MLflow Deployments Client]
-    I -->|Databricks Foundation Model API| J[Meta Llama 3.1 8B\nOpen-Source LLM]
-    J -->|FIR guidance /\nsimple explanation| H
+    G[User input\nHindi / Tamil / Telugu\n10 Indian languages] -->|Sarvam AI translate| H[English text]
+    H --> I[Streamlit App]
+    I -->|encode query| E
+    F -->|top-k BNS sections| J[MLflow Deployments Client]
+    J -->|Databricks Foundation Model API| K[Meta Llama 3.1 8B\nOpen-Source LLM]
+    K -->|English guidance| L[Sarvam AI translate]
+    L -->|User's language| I
 ```
 
 ---
 
 ## What it does
 
-**Task 1 — Legal Simplifier:** Paste any BNS or Constitution text → get a plain-English explanation written for a 15-year-old, powered by Llama 3.1 8B.
+**Nyaya-Sahayak** ("Legal Helper") gives every Indian citizen access to legal knowledge in their own language. It has two AI-powered tools:
 
-**Task 2 — FIR Category Helper:** Describe an incident ("Someone stole my bike") → FAISS retrieves the most relevant BNS sections → Llama 3.1 suggests the offense type, applicable sections, and step-by-step FIR filing advice.
+- **BNS Explanation** — Paste any legal text from BNS 2023 or the Constitution → get a plain-English (or Hindi/Tamil/Telugu etc.) explanation written for a 15-year-old
+- **FIR Category Helper** — Describe an incident in any Indian language → FAISS retrieves the most relevant BNS sections → Llama 3.1 8B identifies the offense type and gives step-by-step FIR filing advice → Sarvam AI translates the guidance back to the user's language
 
 ---
 
@@ -37,27 +39,29 @@ flowchart TD
 | Technology | Usage |
 |---|---|
 | Apache Spark | ETL pipeline — reads CSVs, cleans data, writes Delta tables |
-| Delta Lake | Managed storage for BNS sections and incident dataset |
+| Delta Lake | Managed storage for BNS sections and incident dataset (Unity Catalog) |
 | Databricks Foundation Model APIs | Serves Meta Llama 3.1 8B (open-source) |
 | MLflow Deployments | Client to call the Foundation Model API endpoint |
 | Unity Catalog | Manages Delta tables and Volume storage |
 
-## Open-Source Models Used
+## Open-Source Models & Tools Used
 
-| Model | Usage |
+| Model / Tool | Usage |
 |---|---|
 | `sentence-transformers/all-MiniLM-L6-v2` | Encodes BNS sections and user queries into vectors |
 | `meta-llama/Meta-Llama-3.1-8B-Instruct` | Legal simplification and FIR guidance (via Databricks) |
-| FAISS (`IndexFlatIP`) | Cosine similarity search over BNS section embeddings |
+| FAISS `IndexFlatIP` | Cosine similarity search over BNS section embeddings |
+| Sarvam AI `mayura:v1` | Translates between English and 10 Indian languages |
 
 ---
 
-## How to Run
+## How to Run (Fresh Machine)
 
 ### Prerequisites
 - Python 3.9+
-- A Databricks workspace (Free Edition works)
+- Databricks workspace (Free Edition works)
 - Databricks Personal Access Token (`dapi...`)
+- Sarvam AI API key (free at `https://dashboard.sarvam.ai`)
 
 ### 1. Clone the repo
 ```bash
@@ -67,7 +71,7 @@ cd nyaya-sahayak
 
 ### 2. Install dependencies
 ```bash
-pip install streamlit faiss-cpu sentence-transformers "numpy<2.0" openai
+pip install streamlit faiss-cpu sentence-transformers "numpy<2.0" openai requests
 ```
 
 ### 3. Generate synthetic dataset
@@ -80,58 +84,69 @@ python 01_generate_synthetic_data.py
 python 03_build_faiss_index.py
 ```
 
-### 5. Run the Streamlit app
+### 5. Run the app
 ```bash
 streamlit run 04_nyaya_sahayak_app.py
 ```
 
-Open `http://localhost:8501` → paste your Databricks token in the sidebar → use the app.
+Open `http://localhost:8501` in your browser.
+
+### 6. Configure in the sidebar
+- Paste your **Databricks Token** (`dapi...`)
+- Paste your **Sarvam AI Key**
+- Select your **language** (English, Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia)
 
 ---
 
-### Running the Databricks Pipeline (optional — for full Spark + Delta Lake flow)
+### Running the Databricks Pipeline (full Spark + Delta Lake flow)
 
-Import these notebooks into your Databricks workspace in order:
+Import these notebooks into Databricks Workspace → run in order using Serverless compute:
 
 ```
-databricks/nb_00_setup.py      → installs packages
-databricks/nb_01_etl.py        → Spark ETL → Delta tables
-databricks/nb_02_build_faiss.py → builds FAISS index
+databricks/nb_00_setup.py        → installs packages
+databricks/nb_01_etl.py          → Spark ETL → Delta tables
+databricks/nb_02_build_faiss.py  → builds FAISS index
 databricks/nb_03_inference_demo.py → interactive demo
 ```
-
-Run them top to bottom using Serverless compute.
 
 ---
 
 ## Demo Steps
 
-### Task 1 — Legal Simplifier
-1. Open the app → click **"📖 Explain Like I'm 15"** tab
-2. Paste this text:
+### Task 1 — BNS Explanation
+1. Open the app → enter tokens in sidebar → select language (e.g. **Hindi**)
+2. Click **"📖 BNS Explanation"** tab
+3. Paste:
    ```
    Whoever commits theft shall be punished with imprisonment of either description
    for a term which may extend to three years, or with fine, or with both.
    ```
-3. Click **Simplify ✨**
-4. See plain-English explanation with a "What this means for you" note
+4. Click **Simplify ✨**
+5. Get plain-language explanation in **Hindi**
 
 ### Task 2 — FIR Category Helper
 1. Click **"🚨 FIR Category Helper"** tab
-2. Select **"Someone stole my bike"** from the dropdown
+2. Select language **Hindi**, type: `किसी ने मेरी साइकिल चुरा ली`
 3. Click **Analyse & Suggest FIR Sections 🔍**
-4. See: FAISS retrieves BNS Section 305 (Theft), Llama 3.1 explains it and gives FIR steps
+4. App translates to English → FAISS retrieves **BNS Section 305** (Theft) → Llama generates FIR guidance → Sarvam translates back to **Hindi**
 
 Try also:
-- `My husband beats me and demands dowry` → Sec 80 (Dowry Death) + Sec 85 (Cruelty)
-- `My phone was hacked and money was stolen` → Cybercrime + Sec 316
+- `मेरे पति मुझे मारते हैं और दहेज मांगते हैं` → Sec 80 (Dowry Death) + Sec 85 (Cruelty)
+- `Someone stole my bike` (English) → Sec 305 (Theft)
+- `My phone was hacked` → Cybercrime + Sec 316
+
+---
+
+## Project Write-up (500 characters)
+
+> Nyaya-Sahayak is an AI legal assistant built on Databricks that makes Indian law accessible to everyone. It uses Apache Spark to ETL the Bharatiya Nyaya Sanhita 2023 into Delta Lake, FAISS for semantic retrieval of BNS sections, Meta Llama 3.1 8B via Databricks Foundation Model APIs for legal reasoning, and Sarvam AI to support 10 Indian languages. Citizens describe incidents in their language and get correct FIR sections and filing guidance instantly.
 
 ---
 
 ## Dataset
 
 - **BNS 2023**: Official Bharatiya Nyaya Sanhita 2023 — 358 sections across 20 chapters
-- **Synthetic Incidents**: 171 labeled FIR incident descriptions across 16 offense types (generated)
+- **Synthetic Incidents**: 171 labeled FIR incident descriptions across 16 offense types
 
 Source: [India Code — BNS 2023](https://www.indiacode.nic.in/handle/123456789/20062)
 

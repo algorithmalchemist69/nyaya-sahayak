@@ -126,11 +126,11 @@ def main():
 
     client = get_llm_client(token)
 
-    tab1, tab2 = st.tabs(["📖 Explain Like I'm 15", "🚨 FIR Category Helper"])
+    tab1, tab2 = st.tabs(["📖 BNS Explanation", "🚨 FIR Category Helper"])
 
     # ── Tab 1 ─────────────────────────────────────────────────────────────────
     with tab1:
-        st.subheader("Legal Text Simplifier")
+        st.subheader("BNS Explanation")
         st.write("Paste any BNS or Constitution text and get a plain-English explanation.")
 
         legal_input = st.text_area(

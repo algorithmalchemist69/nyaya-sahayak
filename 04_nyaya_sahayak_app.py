@@ -220,21 +220,18 @@ def main():
             if not legal_input.strip():
                 st.warning("Please paste some legal text first.")
             else:
+                lang_instruction = f"Respond in {lang_choice}." if lang_choice != "English" else ""
                 with st.spinner("Llama 3.1 is thinking …"):
                     result = call_llm(
                         system_prompt=(
-                            "You are a friendly legal expert explaining Indian law "
-                            "to a 15-year-old. Use short sentences, everyday words, "
-                            "and relatable analogies. End with a one-line "
-                            "'What this means for you' note."
+                            f"You are a friendly legal expert explaining Indian law "
+                            f"to a 15-year-old. Use short sentences, everyday words, "
+                            f"and relatable analogies. End with a one-line "
+                            f"'What this means for you' note. {lang_instruction}"
                         ),
-                        user_prompt=f"Explain simply (like I'm 15):\n\n{legal_input.strip()}",
+                        user_prompt=f"Explain simply:\n\n{legal_input.strip()}",
                         client=client,
                     )
-
-                if multilingual:
-                    with st.spinner(f"Translating to {lang_choice} via Sarvam AI …"):
-                        result = translate(result, "en-IN", lang_code, sarvam_key)
 
                 st.success("Explanation:")
                 st.markdown(result)
@@ -268,10 +265,10 @@ def main():
             if not incident_input.strip():
                 st.warning("Please describe the incident.")
             else:
-                # Translate input to English for FAISS + LLM
+                # Sarvam translates only the short user input to English for FAISS
                 english_input = incident_input.strip()
                 if multilingual:
-                    with st.spinner(f"Translating from {lang_choice} to English …"):
+                    with st.spinner(f"Translating from {lang_choice} to English via Sarvam …"):
                         english_input = translate(incident_input.strip(), lang_code, "en-IN", sarvam_key)
                     st.caption(f"Translated input: _{english_input}_")
 
@@ -292,13 +289,14 @@ def main():
                 )
                 offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 
+                lang_instruction = f"Respond in {lang_choice}." if lang_choice != "English" else ""
                 with st.spinner("Llama 3.1 is generating FIR guidance …"):
                     guidance = call_llm(
                         system_prompt=(
-                            "You are a legal assistant helping Indian citizens file an FIR. "
-                            "Identify the offense type, list relevant BNS sections, explain "
-                            "why each applies in plain language, and advise what to do next. "
-                            "Be empathetic and clear."
+                            f"You are a legal assistant helping Indian citizens file an FIR. "
+                            f"Identify the offense type, list relevant BNS sections, explain "
+                            f"why each applies in plain language, and advise what to do next. "
+                            f"Be empathetic and clear. {lang_instruction}"
                         ),
                         user_prompt=(
                             f"Incident: {english_input}\n\n"
@@ -308,11 +306,6 @@ def main():
                         client=client,
                         max_tokens=1200,
                     )
-
-                # Translate output back to user's language
-                if multilingual:
-                    with st.spinner(f"Translating guidance to {lang_choice} via Sarvam AI …"):
-                        guidance = translate(guidance, "en-IN", lang_code, sarvam_key)
 
                 st.success("FIR Guidance")
                 st.markdown(guidance)

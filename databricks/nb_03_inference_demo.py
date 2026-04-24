@@ -116,14 +116,17 @@ def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> st
     return response["choices"][0]["message"]["content"]
 
 
-def _translate_chunk(chunk: str, src: str, tgt: str, key: str) -> str:
+def translate_input(text: str, src: str, key: str) -> str:
+    """Translate only short user input to English using Sarvam AI."""
+    if src == "en-IN" or not text.strip() or not key:
+        return text
     r = requests.post(
         SARVAM_URL,
         headers={"api-subscription-key": key},
         json={
-            "input": chunk,
+            "input": text[:900],
             "source_language_code": src,
-            "target_language_code": tgt,
+            "target_language_code": "en-IN",
             "speaker_gender": "Female",
             "mode": "formal",
             "model": "mayura:v1",
@@ -132,24 +135,7 @@ def _translate_chunk(chunk: str, src: str, tgt: str, key: str) -> str:
         timeout=30,
     )
     r.raise_for_status()
-    return r.json().get("translated_text", chunk)
-
-
-def translate(text: str, src: str, tgt: str, key: str) -> str:
-    if src == tgt or not text.strip() or not key:
-        return text
-    paragraphs = text.split("\n")
-    chunks, current = [], ""
-    for para in paragraphs:
-        if len(current) + len(para) + 1 > 900:
-            if current:
-                chunks.append(current.strip())
-            current = para
-        else:
-            current = (current + "\n" + para) if current else para
-    if current:
-        chunks.append(current.strip())
-    return "\n".join(_translate_chunk(c, src, tgt, key) for c in chunks if c)
+    return r.json().get("translated_text", text)
 
 # COMMAND ----------
 
@@ -179,17 +165,16 @@ lang_name   = dbutils.widgets.get("language")
 lang_code   = LANGUAGES[lang_name]
 legal_text  = dbutils.widgets.get("legal_text")
 
+lang_instruction = f"Respond in {lang_name}." if lang_name != "English" else ""
+
 simplified = call_llm(
     system_prompt=(
-        "You are a friendly legal expert explaining Indian law (BNS/Constitution) "
-        "to a 15-year-old. Use short sentences, everyday words, and relatable analogies. "
-        "After the explanation, add a one-line 'What this means for you' note."
+        f"You are a friendly legal expert explaining Indian law (BNS/Constitution) "
+        f"to a 15-year-old. Use short sentences, everyday words, and relatable analogies. "
+        f"End with a one-line 'What this means for you' note. {lang_instruction}"
     ),
-    user_prompt=f"Explain in very simple English (like I'm 15):\n\n{legal_text}",
+    user_prompt=f"Explain simply:\n\n{legal_text}",
 )
-
-if lang_code != "en-IN":
-    simplified = translate(simplified, "en-IN", lang_code, sarvam_key)
 
 displayHTML(f"""
 <div style="font-family:sans-serif; max-width:700px; padding:20px;
@@ -210,8 +195,8 @@ displayHTML(f"""
 incident  = dbutils.widgets.get("incident")
 top_k     = int(dbutils.widgets.get("top_k"))
 
-# Translate incident to English for FAISS + LLM
-english_incident = translate(incident, lang_code, "en-IN", sarvam_key)
+# Sarvam translates only the short user input to English for FAISS retrieval
+english_incident = translate_input(incident, lang_code, sarvam_key)
 
 sections = retrieve(english_incident, top_k=top_k)
 
@@ -221,11 +206,13 @@ sections_text = "\n".join(
 )
 offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 
+# Llama responds directly in the target language — much better quality than translating output
 guidance = call_llm(
     system_prompt=(
-        "You are a legal assistant helping Indian citizens file an FIR. "
-        "Identify the offense type, list relevant BNS sections, explain why each applies "
-        "in plain language, and advise what to do next. Be empathetic and clear."
+        f"You are a legal assistant helping Indian citizens file an FIR. "
+        f"Identify the offense type, list relevant BNS sections, explain why each applies "
+        f"in plain language, and advise what to do next. Be empathetic and clear. "
+        f"{lang_instruction}"
     ),
     user_prompt=(
         f"Incident: {english_incident}\n\n"
@@ -234,9 +221,6 @@ guidance = call_llm(
     ),
     max_tokens=1200,
 )
-
-if lang_code != "en-IN":
-    guidance = translate(guidance, "en-IN", lang_code, sarvam_key)
 
 retrieved_html = "".join(
     f"<tr><td style='padding:6px;border-bottom:1px solid #eee;'><b>Sec {r['Section']}</b></td>"

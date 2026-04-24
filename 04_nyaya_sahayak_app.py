@@ -8,19 +8,35 @@ import pickle
 
 import faiss
 import numpy as np
+import requests
 import streamlit as st
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 
-# ── Paths (local FAISS index built by 03_build_faiss_index.py) ───────────────
+# ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "faiss_index", "bns.index")
 META_PATH  = os.path.join(BASE_DIR, "faiss_index", "bns_metadata.pkl")
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# Databricks Foundation Model API (open-source Llama 3.1 8B)
-DATABRICKS_HOST  = "https://dbc-3f37515c-6bbb.cloud.databricks.com"
-LLM_ENDPOINT     = "databricks-meta-llama-3-1-8b-instruct"
+DATABRICKS_HOST = "https://dbc-3f37515c-6bbb.cloud.databricks.com"
+LLM_ENDPOINT    = "databricks-meta-llama-3-1-8b-instruct"
+SARVAM_API_URL  = "https://api.sarvam.ai/translate"
+
+# ── Supported Indian languages ────────────────────────────────────────────────
+LANGUAGES = {
+    "English":    "en-IN",
+    "Hindi":      "hi-IN",
+    "Tamil":      "ta-IN",
+    "Telugu":     "te-IN",
+    "Kannada":    "kn-IN",
+    "Malayalam":  "ml-IN",
+    "Bengali":    "bn-IN",
+    "Marathi":    "mr-IN",
+    "Gujarati":   "gu-IN",
+    "Punjabi":    "pa-IN",
+    "Odia":       "or-IN",
+}
 
 OFFENSE_HINTS = {
     "Theft":             "Chapter 17 — BNS Sections 303-305",
@@ -65,6 +81,30 @@ def get_llm_client(token: str):
     )
 
 
+# ── Sarvam translation ────────────────────────────────────────────────────────
+
+def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
+    """Translate text using Sarvam AI. Returns original text if src == tgt."""
+    if src == tgt or not text.strip():
+        return text
+    response = requests.post(
+        SARVAM_API_URL,
+        headers={"api-subscription-key": sarvam_key},
+        json={
+            "input":                  text,
+            "source_language_code":   src,
+            "target_language_code":   tgt,
+            "speaker_gender":         "Female",
+            "mode":                   "formal",
+            "model":                  "mayura:v1",
+            "enable_preprocessing":   True,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json().get("translated_text", text)
+
+
 # ── Retrieval ─────────────────────────────────────────────────────────────────
 
 def retrieve(query: str, top_k: int = 5) -> list:
@@ -100,7 +140,7 @@ def call_llm(system_prompt: str, user_prompt: str, client, max_tokens: int = 102
 def main():
     st.set_page_config(page_title="Nyaya-Sahayak", page_icon="⚖️", layout="wide")
     st.title("⚖️ Nyaya-Sahayak")
-    st.caption("Governance & Access to Justice — Spark · Delta Lake · FAISS · Llama 3.1 8B")
+    st.caption("Governance & Access to Justice — Spark · Delta Lake · FAISS · Llama 3.1 8B · Sarvam AI")
 
     with st.sidebar:
         st.header("Configuration")
@@ -109,12 +149,25 @@ def main():
             type="password",
             help="Your Databricks Personal Access Token (dapi...)",
         )
+        sarvam_key = st.text_input(
+            "Sarvam AI Key",
+            type="password",
+            help="Your Sarvam AI API key for Indian language support",
+        )
+        st.divider()
+        lang_choice = st.selectbox(
+            "🌐 Language / भाषा",
+            list(LANGUAGES.keys()),
+            index=0,
+        )
+        lang_code = LANGUAGES[lang_choice]
         st.divider()
         st.markdown(
             "**Stack**\n"
             "- Apache Spark + Delta Lake\n"
             "- FAISS (semantic retrieval)\n"
-            "- Llama 3.1 8B (open-source)\n\n"
+            "- Llama 3.1 8B (open-source)\n"
+            "- Sarvam AI (Indian languages)\n\n"
             "**Data**\n"
             "- Bharatiya Nyaya Sanhita, 2023\n"
             "- Synthetic FIR incident dataset"
@@ -124,7 +177,11 @@ def main():
         st.warning("Enter your Databricks Token in the sidebar to start.")
         st.stop()
 
+    multilingual = bool(sarvam_key) and lang_choice != "English"
     client = get_llm_client(token)
+
+    if multilingual:
+        st.info(f"🌐 Active language: **{lang_choice}** — powered by Sarvam AI")
 
     tab1, tab2 = st.tabs(["📖 BNS Explanation", "🚨 FIR Category Helper"])
 
@@ -154,13 +211,21 @@ def main():
                         user_prompt=f"Explain simply (like I'm 15):\n\n{legal_input.strip()}",
                         client=client,
                     )
-                st.success("Simple explanation:")
+
+                if multilingual:
+                    with st.spinner(f"Translating to {lang_choice} via Sarvam AI …"):
+                        result = translate(result, "en-IN", lang_code, sarvam_key)
+
+                st.success("Explanation:")
                 st.markdown(result)
 
     # ── Tab 2 ─────────────────────────────────────────────────────────────────
     with tab2:
         st.subheader("FIR Category Helper")
-        st.write("Describe the incident — the app finds relevant BNS sections and guides you.")
+        if multilingual:
+            st.write(f"Describe the incident in **{lang_choice}** — the app finds relevant BNS sections and guides you.")
+        else:
+            st.write("Describe the incident — the app finds relevant BNS sections and guides you.")
 
         examples = [
             "Someone stole my bike",
@@ -173,7 +238,7 @@ def main():
 
         choice = st.selectbox("Try an example", ["(type your own)"] + examples)
         incident_input = st.text_area(
-            "Describe the incident",
+            f"Describe the incident (in {lang_choice})",
             value="" if choice == "(type your own)" else choice,
             height=110,
         )
@@ -183,8 +248,15 @@ def main():
             if not incident_input.strip():
                 st.warning("Please describe the incident.")
             else:
+                # Translate input to English for FAISS + LLM
+                english_input = incident_input.strip()
+                if multilingual:
+                    with st.spinner(f"Translating from {lang_choice} to English …"):
+                        english_input = translate(incident_input.strip(), lang_code, "en-IN", sarvam_key)
+                    st.caption(f"Translated input: _{english_input}_")
+
                 with st.spinner("Retrieving BNS sections via FAISS …"):
-                    sections = retrieve(incident_input.strip(), top_k=top_k)
+                    sections = retrieve(english_input, top_k=top_k)
 
                 with st.expander(f"Retrieved BNS Sections (top {top_k})", expanded=False):
                     for s in sections:
@@ -209,13 +281,18 @@ def main():
                             "Be empathetic and clear."
                         ),
                         user_prompt=(
-                            f"Incident: {incident_input.strip()}\n\n"
+                            f"Incident: {english_input}\n\n"
                             f"Retrieved BNS sections:\n{sections_text}\n\n"
                             f"Offense type reference:\n{offense_list}"
                         ),
                         client=client,
                         max_tokens=1200,
                     )
+
+                # Translate output back to user's language
+                if multilingual:
+                    with st.spinner(f"Translating guidance to {lang_choice} via Sarvam AI …"):
+                        guidance = translate(guidance, "en-IN", lang_code, sarvam_key)
 
                 st.success("FIR Guidance")
                 st.markdown(guidance)

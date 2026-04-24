@@ -10,6 +10,7 @@ import faiss
 import numpy as np
 import requests
 import streamlit as st
+from langdetect import detect, LangDetectException
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 
@@ -36,6 +37,12 @@ LANGUAGES = {
     "Gujarati":   "gu-IN",
     "Punjabi":    "pa-IN",
     "Odia":       "or-IN",
+}
+
+LANGDETECT_CODES = {
+    "Hindi": "hi", "Tamil": "ta", "Telugu": "te", "Kannada": "kn",
+    "Malayalam": "ml", "Bengali": "bn", "Marathi": "mr",
+    "Gujarati": "gu", "Punjabi": "pa", "Odia": "or",
 }
 
 OFFENSE_HINTS = {
@@ -123,6 +130,38 @@ def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
 
     translated_chunks = [_translate_chunk(c, src, tgt, sarvam_key) for c in chunks if c]
     return "\n".join(translated_chunks)
+
+
+# ── BhashaBench scoring ───────────────────────────────────────────────────────
+
+def bhasha_bench_score(
+    guidance: str,
+    lang_choice: str,
+    lang_code: str,
+    english_ref: str,
+    sarvam_key: str,
+) -> tuple:
+    """Returns (lang_score, sem_score, composite, detected_lang)."""
+    expected = LANGDETECT_CODES.get(lang_choice, "")
+    try:
+        detected = detect(guidance)
+        lang_score = 1.0 if detected == expected else 0.0
+    except LangDetectException:
+        detected = "unknown"
+        lang_score = 0.0
+
+    try:
+        back_en = translate(guidance, lang_code, "en-IN", sarvam_key)
+        model = load_embed_model()
+        v_ref  = model.encode([english_ref], normalize_embeddings=True).astype(np.float32)
+        v_back = model.encode([back_en],     normalize_embeddings=True).astype(np.float32)
+        sem_score = float(np.dot(v_ref, v_back.T).squeeze())
+        sem_score = max(0.0, min(1.0, sem_score))
+    except Exception:
+        sem_score = 0.0
+
+    composite = round((0.5 * lang_score + 0.5 * sem_score) * 100, 1)
+    return lang_score, sem_score, composite, detected
 
 
 # ── Retrieval ─────────────────────────────────────────────────────────────────
@@ -309,6 +348,31 @@ def main():
 
                 st.success("FIR Guidance")
                 st.markdown(guidance)
+
+                if multilingual and sarvam_key:
+                    with st.spinner("Computing BhashaBench score …"):
+                        english_ref = f"Incident: {english_input}\n\n{sections_text}"
+                        lang_score, sem_score, composite, detected = bhasha_bench_score(
+                            guidance, lang_choice, lang_code, english_ref, sarvam_key
+                        )
+                    st.subheader("📊 BhashaBench Score")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric(
+                        "Language Detection",
+                        f"{lang_score * 100:.0f} / 100",
+                        help=f"Detected: {detected} · Expected: {LANGDETECT_CODES.get(lang_choice, '?')}",
+                    )
+                    c2.metric(
+                        "Semantic Fidelity",
+                        f"{sem_score * 100:.1f} / 100",
+                        help="Round-trip cosine similarity with English reference via Sarvam AI",
+                    )
+                    c3.metric(
+                        "BhashaBench Score",
+                        f"{composite} / 100",
+                        help="Composite: 50% language detection + 50% semantic fidelity",
+                    )
+
                 st.info(
                     "⚠️ AI-generated guidance for informational purposes only. "
                     "Visit your nearest police station or consult a lawyer to file an official FIR."

@@ -46,9 +46,6 @@ META_PATH  = f"{FAISS_DIR}/bns_metadata.pkl"
 BNS_TABLE       = f"{CATALOG}.{SCHEMA}.bns_sections"
 INCIDENTS_TABLE = f"{CATALOG}.{SCHEMA}.incidents"
 
-# Anthropic API key (from Databricks Secrets)
-# ANTHROPIC_API_KEY = dbutils.secrets.get("nyaya", "anthropic_api_key")
-
 # ── Create catalog objects if they don't exist ────────────────────────────────
 spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")

@@ -1,0 +1,6 @@
+delta_lake/
+__pycache__/
+*.pyc
+.env
+databricks/.DS_Store
+.DS_Store

@@ -1,0 +1,16 @@
+# Databricks Apps configuration
+# Deploy with: databricks apps deploy nyaya-sahayak --source-code-path ./databricks/app
+
+command:
+  - streamlit
+  - run
+  - app.py
+  - --server.port=8080
+  - --server.headless=true
+
+env:
+  - name: ANTHROPIC_API_KEY
+    valueFrom:
+      secretRef:
+        scope: nyaya                    # Databricks secret scope
+        key:   anthropic_api_key        # Secret key name

@@ -6,6 +6,7 @@ Run: streamlit run 04_nyaya_sahayak_app.py
 import base64
 import os
 import pickle
+import struct
 
 import faiss
 import numpy as np
@@ -150,13 +151,50 @@ def speech_to_text(audio_bytes: bytes, lang_code: str, sarvam_key: str) -> str:
     return response.json().get("transcript", "")
 
 
+def _concat_wavs(wav_list: list) -> bytes:
+    """Concatenate multiple WAV byte strings into one valid WAV."""
+    all_pcm = b""
+    first_header = None
+    for wav in wav_list:
+        idx = wav.find(b"data")
+        if idx < 0:
+            continue
+        pcm_size = struct.unpack_from("<I", wav, idx + 4)[0]
+        pcm = wav[idx + 8 : idx + 8 + pcm_size]
+        if first_header is None:
+            first_header = bytearray(wav[: idx + 8])
+        all_pcm += pcm
+    if not first_header or not all_pcm:
+        return b""
+    struct.pack_into("<I", first_header, 4, len(all_pcm) + len(first_header) - 8)
+    struct.pack_into("<I", first_header, len(first_header) - 4, len(all_pcm))
+    return bytes(first_header) + all_pcm
+
+
 def text_to_speech(text: str, lang_code: str, sarvam_key: str) -> bytes:
-    """Convert text to speech via Sarvam AI. Returns raw WAV bytes."""
+    """Convert full text to speech via Sarvam AI, chunking into ≤480-char pieces."""
+    # Split at sentence boundaries into ≤480-char chunks
+    sentences = [s.strip() for s in text.replace("\n", " ").split(".") if s.strip()]
+    chunks, current = [], ""
+    for s in sentences:
+        candidate = (current + ". " + s) if current else s
+        if len(candidate) > 480:
+            if current:
+                chunks.append(current + ".")
+            current = s
+        else:
+            current = candidate
+    if current:
+        chunks.append(current + ".")
+
+    if not chunks:
+        return b""
+
     response = requests.post(
         SARVAM_TTS_URL,
         headers={"api-subscription-key": sarvam_key, "Content-Type": "application/json"},
         json={
-            "inputs":               [text[:500]],
+            "inputs":               chunks[:6],
             "target_language_code": lang_code,
             "speaker":              "anushka",
             "pitch":                0,
@@ -166,12 +204,13 @@ def text_to_speech(text: str, lang_code: str, sarvam_key: str) -> bytes:
             "enable_preprocessing": True,
             "model":                "bulbul:v2",
         },
-        timeout=60,
+        timeout=120,
     )
     if not response.ok:
         raise RuntimeError(f"Sarvam TTS {response.status_code}: {response.text}")
     audios = response.json().get("audios", [])
-    return base64.b64decode(audios[0]) if audios else b""
+    wav_list = [base64.b64decode(a) for a in audios]
+    return _concat_wavs(wav_list)
 
 
 # ── BhashaBench scoring ───────────────────────────────────────────────────────
@@ -302,18 +341,23 @@ def main():
             if not final_legal:
                 st.warning("Please paste or record some legal text first.")
             else:
-                lang_instruction = f"Respond in {lang_choice}." if lang_choice != "English" else ""
                 with st.spinner("Llama 3.1 is thinking …"):
-                    result = call_llm(
+                    result_en = call_llm(
                         system_prompt=(
-                            f"You are a friendly legal expert explaining Indian law "
-                            f"to a 15-year-old. Use short sentences, everyday words, "
-                            f"and relatable analogies. End with a one-line "
-                            f"'What this means for you' note. {lang_instruction}"
+                            "You are a friendly legal expert explaining Indian law "
+                            "to a 15-year-old. Use short sentences, everyday words, "
+                            "and relatable analogies. End with a one-line "
+                            "'What this means for you' note. Respond in English."
                         ),
                         user_prompt=f"Explain simply:\n\n{final_legal}",
                         client=client,
                     )
+
+                # Translate to user's language if needed
+                result = result_en
+                if multilingual:
+                    with st.spinner(f"Translating to {lang_choice} via Sarvam …"):
+                        result = translate(result_en, "en-IN", lang_code, sarvam_key)
 
                 st.success("Explanation:")
                 st.markdown(result)
@@ -324,7 +368,7 @@ def main():
                         try:
                             audio_bytes = text_to_speech(result, lang_code, sarvam_key)
                             if audio_bytes:
-                                st.caption("🔊 Voice output (first ~500 characters)")
+                                st.caption("🔊 Voice output")
                                 st.audio(audio_bytes, format="audio/wav")
                         except Exception as e:
                             st.caption(f"Voice output unavailable: {e}")
@@ -381,8 +425,6 @@ def main():
             final_incident = incident_input.strip()
             if voice_incident and sarvam_key:
                 raw = voice_incident.read()
-                with st.expander("🔍 Audio debug info", expanded=False):
-                    st.write(f"Size: {len(raw)} bytes | First 4 bytes: {raw[:4].hex()} | Detected as: {'WAV' if raw[:4]==b'RIFF' else 'WebM/other'}")
                 with st.spinner("Transcribing voice …"):
                     try:
                         transcribed = speech_to_text(raw, lang_code, sarvam_key)
@@ -419,14 +461,13 @@ def main():
                 )
                 offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 
-                lang_instruction = f"Respond in {lang_choice}." if lang_choice != "English" else ""
                 with st.spinner("Llama 3.1 is generating FIR guidance …"):
-                    guidance = call_llm(
+                    guidance_en = call_llm(
                         system_prompt=(
-                            f"You are a legal assistant helping Indian citizens file an FIR. "
-                            f"Identify the offense type, list relevant BNS sections, explain "
-                            f"why each applies in plain language, and advise what to do next. "
-                            f"Be empathetic and clear. {lang_instruction}"
+                            "You are a legal assistant helping Indian citizens file an FIR. "
+                            "Identify the offense type, list relevant BNS sections, explain "
+                            "why each applies in plain language, and advise what to do next. "
+                            "Be empathetic and clear. Respond in English."
                         ),
                         user_prompt=(
                             f"Incident: {english_input}\n\n"
@@ -437,6 +478,12 @@ def main():
                         max_tokens=1200,
                     )
 
+                # Translate to user's language if needed
+                guidance = guidance_en
+                if multilingual:
+                    with st.spinner(f"Translating to {lang_choice} via Sarvam …"):
+                        guidance = translate(guidance_en, "en-IN", lang_code, sarvam_key)
+
                 st.success("FIR Guidance")
                 st.markdown(guidance)
 
@@ -446,7 +493,7 @@ def main():
                         try:
                             audio_bytes = text_to_speech(guidance, lang_code, sarvam_key)
                             if audio_bytes:
-                                st.caption("🔊 Voice output (first ~500 characters)")
+                                st.caption("🔊 Voice output")
                                 st.audio(audio_bytes, format="audio/wav")
                         except Exception as e:
                             st.caption(f"Voice output unavailable: {e}")

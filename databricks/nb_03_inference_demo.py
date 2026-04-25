@@ -82,6 +82,7 @@ OFFENSE_HINTS = {
 
 import base64
 import pickle
+import struct
 import requests
 import numpy as np
 import faiss
@@ -194,16 +195,50 @@ def speech_to_text(file_path: str, lang_code: str, key: str) -> str:
         return ""
 
 
+def _concat_wavs(wav_list: list) -> bytes:
+    """Concatenate multiple WAV byte strings into one valid WAV."""
+    all_pcm = b""
+    first_header = None
+    for wav in wav_list:
+        idx = wav.find(b"data")
+        if idx < 0:
+            continue
+        pcm_size = struct.unpack_from("<I", wav, idx + 4)[0]
+        pcm = wav[idx + 8 : idx + 8 + pcm_size]
+        if first_header is None:
+            first_header = bytearray(wav[: idx + 8])
+        all_pcm += pcm
+    if not first_header or not all_pcm:
+        return b""
+    struct.pack_into("<I", first_header, 4, len(all_pcm) + len(first_header) - 8)
+    struct.pack_into("<I", first_header, len(first_header) - 4, len(all_pcm))
+    return bytes(first_header) + all_pcm
+
+
 def text_to_speech(text: str, lang_code: str, key: str) -> str:
-    """Convert text to speech via Sarvam AI. Returns base64 WAV string for HTML embedding."""
+    """Convert full text to speech via Sarvam AI. Returns base64 WAV for HTML embedding."""
     if not key or lang_code == "en-IN" or not text.strip():
         return ""
     try:
+        sentences = [s.strip() for s in text.replace("\n", " ").split(".") if s.strip()]
+        chunks, current = [], ""
+        for s in sentences:
+            candidate = (current + ". " + s) if current else s
+            if len(candidate) > 480:
+                if current:
+                    chunks.append(current + ".")
+                current = s
+            else:
+                current = candidate
+        if current:
+            chunks.append(current + ".")
+        if not chunks:
+            return ""
         r = requests.post(
             SARVAM_TTS_URL,
             headers={"api-subscription-key": key, "Content-Type": "application/json"},
             json={
-                "inputs":               [text[:500]],
+                "inputs":               chunks[:6],
                 "target_language_code": lang_code,
                 "speaker":              "anushka",
                 "pitch":                0,
@@ -213,11 +248,13 @@ def text_to_speech(text: str, lang_code: str, key: str) -> str:
                 "enable_preprocessing": True,
                 "model":                "bulbul:v2",
             },
-            timeout=60,
+            timeout=120,
         )
         r.raise_for_status()
         audios = r.json().get("audios", [])
-        return audios[0] if audios else ""
+        wav_list = [base64.b64decode(a) for a in audios]
+        combined = _concat_wavs(wav_list)
+        return base64.b64encode(combined).decode() if combined else ""
     except Exception as e:
         print(f"TTS error: {e}")
         return ""
@@ -277,16 +314,19 @@ if stt_path.strip() and sarvam_key:
         print(f"STT transcription: {transcribed}")
         legal_text = transcribed
 
-lang_instruction = f"Respond in {lang_name}." if lang_name != "English" else ""
-
-simplified = call_llm(
+simplified_en = call_llm(
     system_prompt=(
-        f"You are a friendly legal expert explaining Indian law (BNS/Constitution) "
-        f"to a 15-year-old. Use short sentences, everyday words, and relatable analogies. "
-        f"End with a one-line 'What this means for you' note. {lang_instruction}"
+        "You are a friendly legal expert explaining Indian law (BNS/Constitution) "
+        "to a 15-year-old. Use short sentences, everyday words, and relatable analogies. "
+        "End with a one-line 'What this means for you' note. Respond in English."
     ),
     user_prompt=f"Explain simply:\n\n{legal_text}",
 )
+
+# Translate to user's language for proper script output
+simplified = simplified_en
+if lang_name != "English" and sarvam_key:
+    simplified = translate_text(simplified_en, "en-IN", lang_code, sarvam_key)
 
 # Voice output
 audio_b64_1 = ""
@@ -297,7 +337,7 @@ audio_html_1 = ""
 if audio_b64_1:
     audio_html_1 = f"""
   <div style="margin-top:12px;">
-    <p style="font-size:13px;color:#1565c0;margin:0 0 6px;">&#128266; Voice output (first ~500 characters)</p>
+    <p style="font-size:13px;color:#1565c0;margin:0 0 6px;">&#128266; Voice output</p>
     <audio controls style="width:100%;">
       <source src="data:audio/wav;base64,{audio_b64_1}" type="audio/wav"/>
     </audio>
@@ -365,12 +405,12 @@ sections_text = "\n".join(
 )
 offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 
-guidance = call_llm(
+guidance_en = call_llm(
     system_prompt=(
-        f"You are a legal assistant helping Indian citizens file an FIR. "
-        f"Identify the offense type, list relevant BNS sections, explain "
-        f"why each applies in plain language, and advise what to do next. "
-        f"Be empathetic and clear. {lang_instruction}"
+        "You are a legal assistant helping Indian citizens file an FIR. "
+        "Identify the offense type, list relevant BNS sections, explain "
+        "why each applies in plain language, and advise what to do next. "
+        "Be empathetic and clear. Respond in English."
     ),
     user_prompt=(
         f"Incident: {english_incident}\n\n"
@@ -379,6 +419,11 @@ guidance = call_llm(
     ),
     max_tokens=1200,
 )
+
+# Translate to user's language for proper script output
+guidance = guidance_en
+if lang_name != "English" and sarvam_key:
+    guidance = translate_text(guidance_en, "en-IN", lang_code, sarvam_key)
 
 # Voice output
 audio_b64_2 = ""
@@ -389,7 +434,7 @@ audio_html_2 = ""
 if audio_b64_2:
     audio_html_2 = f"""
   <div style="margin-top:12px;">
-    <p style="font-size:13px;color:#2e7d32;margin:0 0 6px;">&#128266; Voice output (first ~500 characters)</p>
+    <p style="font-size:13px;color:#2e7d32;margin:0 0 6px;">&#128266; Voice output</p>
     <audio controls style="width:100%;">
       <source src="data:audio/wav;base64,{audio_b64_2}" type="audio/wav"/>
     </audio>

@@ -205,7 +205,7 @@ def text_to_speech(text: str, lang_code: str, key: str) -> str:
             json={
                 "inputs":               [text[:500]],
                 "target_language_code": lang_code,
-                "speaker":              "meera",
+                "speaker":              "anushka",
                 "pitch":                0,
                 "pace":                 1.0,
                 "loudness":             1.5,
@@ -368,14 +368,14 @@ offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 guidance = call_llm(
     system_prompt=(
         f"You are a legal assistant helping Indian citizens file an FIR. "
-        f"Step 1: Read the incident and determine the most likely offense type "
-        f"(theft, assault, fraud, etc.) based on common sense — ignore retrieved "
-        f"sections that are clearly unrelated to the incident. "
-        f"Step 2: From the retrieved BNS sections, pick only the ones that "
-        f"genuinely apply. If none fit, use the offense reference list instead. "
-        f"Step 3: Explain each applicable section in plain language. "
-        f"Step 4: Advise the person on what to do next (go to police station, "
-        f"bring documents, etc.). Be empathetic and clear. {lang_instruction}"
+        f"Step 1: Identify the offense type from the incident using common sense. "
+        f"Step 2: Pick only the retrieved BNS sections that genuinely match — "
+        f"ignore clearly unrelated ones. If none fit, use the offense reference list. "
+        f"Step 3: State each applicable BNS section NUMBER and name explicitly, "
+        f"then explain in simple words why it applies. "
+        f"Step 4: Give clear next steps (what to bring to police station, etc.). "
+        f"Always mention at least one specific BNS section number. "
+        f"Be empathetic and clear. {lang_instruction}"
     ),
     user_prompt=(
         f"Incident: {english_incident}\n\n"

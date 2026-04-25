@@ -171,7 +171,7 @@ def translate_input(text: str, src: str, key: str) -> str:
     return translate_text(text, src, "en-IN", key)
 
 
-def speech_to_text(file_path: str, key: str) -> str:
+def speech_to_text(file_path: str, lang_code: str, key: str) -> str:
     """Transcribe an audio file from a Volume path using Sarvam AI STT."""
     if not file_path.strip() or not key:
         return ""
@@ -182,7 +182,7 @@ def speech_to_text(file_path: str, key: str) -> str:
             SARVAM_STT_URL,
             headers={"api-subscription-key": key},
             files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-            data={"model": "saarika:v2", "language_code": "unknown"},
+            data={"model": "saarika:v2", "language_code": lang_code},
             timeout=30,
         )
         r.raise_for_status()
@@ -272,7 +272,7 @@ lang_instruction = f"Respond in {lang_name}." if lang_name != "English" else ""
 
 # Voice input for Task 1 — if an audio file path is provided, transcribe it
 if stt_path.strip() and sarvam_key:
-    transcribed = speech_to_text(stt_path.strip(), sarvam_key)
+    transcribed = speech_to_text(stt_path.strip(), lang_code, sarvam_key)
     if transcribed:
         print(f"STT transcription: {transcribed}")
         legal_text = transcribed
@@ -347,7 +347,7 @@ top_k    = int(dbutils.widgets.get("top_k"))
 
 # Voice input for Task 2 — if an audio file path is provided, transcribe it
 if stt_path.strip() and sarvam_key:
-    transcribed2 = speech_to_text(stt_path.strip(), sarvam_key)
+    transcribed2 = speech_to_text(stt_path.strip(), lang_code, sarvam_key)
     if transcribed2:
         print(f"STT transcription: {transcribed2}")
         incident = transcribed2

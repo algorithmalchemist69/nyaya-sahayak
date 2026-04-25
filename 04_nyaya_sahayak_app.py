@@ -132,13 +132,13 @@ def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
 
 # ── Sarvam voice ──────────────────────────────────────────────────────────────
 
-def speech_to_text(audio_bytes: bytes, sarvam_key: str) -> str:
-    """Transcribe recorded audio via Sarvam AI (auto-detects language)."""
+def speech_to_text(audio_bytes: bytes, lang_code: str, sarvam_key: str) -> str:
+    """Transcribe recorded audio via Sarvam AI."""
     response = requests.post(
         SARVAM_STT_URL,
         headers={"api-subscription-key": sarvam_key},
         files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-        data={"model": "saarika:v2", "language_code": "unknown"},
+        data={"model": "saarika:v2", "language_code": lang_code},
         timeout=30,
     )
     response.raise_for_status()
@@ -286,7 +286,7 @@ def main():
             if voice_legal and sarvam_key:
                 with st.spinner("Transcribing voice …"):
                     try:
-                        transcribed = speech_to_text(voice_legal.read(), sarvam_key)
+                        transcribed = speech_to_text(voice_legal.read(), lang_code, sarvam_key)
                         if transcribed:
                             final_legal = transcribed
                             st.caption(f"🎙️ Transcribed: _{transcribed}_")
@@ -376,7 +376,7 @@ def main():
             if voice_incident and sarvam_key:
                 with st.spinner("Transcribing voice …"):
                     try:
-                        transcribed = speech_to_text(voice_incident.read(), sarvam_key)
+                        transcribed = speech_to_text(voice_incident.read(), lang_code, sarvam_key)
                         if transcribed:
                             final_incident = transcribed
                             st.caption(f"🎙️ Transcribed: _{transcribed}_")

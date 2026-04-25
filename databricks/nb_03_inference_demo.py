@@ -129,6 +129,24 @@ def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> st
     return response["choices"][0]["message"]["content"]
 
 
+def _translate_chunk_nb(chunk: str, src: str, tgt: str, key: str) -> str:
+    """Translate a single chunk via Sarvam AI."""
+    if tgt == "en-IN":
+        payload = {
+            "input": chunk, "source_language_code": src, "target_language_code": tgt,
+            "speaker_gender": "Female", "mode": "formal",
+            "model": "mayura:v1", "enable_preprocessing": True,
+        }
+    else:
+        payload = {
+            "input": chunk, "source_language_code": src, "target_language_code": tgt,
+            "model": "sarvam-translate:v1", "enable_preprocessing": False,
+        }
+    r = requests.post(SARVAM_URL, headers={"api-subscription-key": key}, json=payload, timeout=30)
+    r.raise_for_status()
+    return r.json().get("translated_text", chunk)
+
+
 def translate_text(text: str, src: str, tgt: str, key: str) -> str:
     """Translate text via Sarvam AI, chunking into ≤900-char pieces."""
     if src == tgt or not text.strip() or not key:
@@ -136,35 +154,31 @@ def translate_text(text: str, src: str, tgt: str, key: str) -> str:
     paragraphs = text.split("\n")
     chunks, current = [], ""
     for para in paragraphs:
-        if len(current) + len(para) + 1 > 900:
+        candidate = (current + "\n" + para) if current else para
+        if len(candidate) > 900:
             if current:
                 chunks.append(current.strip())
-            current = para
+            if len(para) > 900:
+                sentences = para.split(". ")
+                sub = ""
+                for sent in sentences:
+                    candidate_sub = (sub + ". " + sent) if sub else sent
+                    if len(candidate_sub) > 900:
+                        if sub:
+                            chunks.append(sub.strip())
+                        sub = sent
+                    else:
+                        sub = candidate_sub
+                if sub:
+                    chunks.append(sub.strip())
+                current = ""
+            else:
+                current = para
         else:
-            current = (current + "\n" + para) if current else para
+            current = candidate
     if current:
         chunks.append(current.strip())
-
-    translated = []
-    for chunk in chunks:
-        if not chunk:
-            continue
-        r = requests.post(
-            SARVAM_URL,
-            headers={"api-subscription-key": key},
-            json={
-                "input": chunk,
-                "source_language_code": src,
-                "target_language_code": tgt,
-                "speaker_gender": "Female",
-                "mode": "formal",
-                "model": "mayura:v1",
-                "enable_preprocessing": True,
-            },
-            timeout=30,
-        )
-        r.raise_for_status()
-        translated.append(r.json().get("translated_text", chunk))
+    translated = [_translate_chunk_nb(c, src, tgt, key) for c in chunks if c.strip()]
     return "\n".join(translated)
 
 

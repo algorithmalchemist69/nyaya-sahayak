@@ -95,10 +95,10 @@ def get_llm_client(token: str):
 # ── Sarvam translation ────────────────────────────────────────────────────────
 
 def _translate_chunk(chunk: str, src: str, tgt: str, sarvam_key: str) -> str:
-    response = requests.post(
-        SARVAM_API_URL,
-        headers={"api-subscription-key": sarvam_key},
-        json={
+    # mayura:v1 — short user input (Indian → English)
+    # sarvam-translate:v1 — long structured LLM output (English → Indian)
+    if tgt == "en-IN":
+        payload = {
             "input":                chunk,
             "source_language_code": src,
             "target_language_code": tgt,
@@ -106,7 +106,19 @@ def _translate_chunk(chunk: str, src: str, tgt: str, sarvam_key: str) -> str:
             "mode":                 "formal",
             "model":                "mayura:v1",
             "enable_preprocessing": True,
-        },
+        }
+    else:
+        payload = {
+            "input":                chunk,
+            "source_language_code": src,
+            "target_language_code": tgt,
+            "model":                "sarvam-translate:v1",
+            "enable_preprocessing": False,
+        }
+    response = requests.post(
+        SARVAM_API_URL,
+        headers={"api-subscription-key": sarvam_key},
+        json=payload,
         timeout=30,
     )
     response.raise_for_status()
@@ -116,18 +128,36 @@ def _translate_chunk(chunk: str, src: str, tgt: str, sarvam_key: str) -> str:
 def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
     if src == tgt or not text.strip():
         return text
+    # Split by newlines and batch into ≤ 900-char chunks (well within Sarvam's 1000-char limit)
     paragraphs = text.split("\n")
     chunks, current = [], ""
     for para in paragraphs:
-        if len(current) + len(para) + 1 > 900:
+        candidate = (current + "\n" + para) if current else para
+        if len(candidate) > 900:
             if current:
                 chunks.append(current.strip())
-            current = para
+            # If the paragraph itself exceeds 900 chars, split it at sentence boundaries
+            if len(para) > 900:
+                sentences = para.split(". ")
+                sub = ""
+                for sent in sentences:
+                    candidate_sub = (sub + ". " + sent) if sub else sent
+                    if len(candidate_sub) > 900:
+                        if sub:
+                            chunks.append(sub.strip())
+                        sub = sent
+                    else:
+                        sub = candidate_sub
+                if sub:
+                    chunks.append(sub.strip())
+                current = ""
+            else:
+                current = para
         else:
-            current = (current + "\n" + para) if current else para
+            current = candidate
     if current:
         chunks.append(current.strip())
-    translated_chunks = [_translate_chunk(c, src, tgt, sarvam_key) for c in chunks if c]
+    translated_chunks = [_translate_chunk(c, src, tgt, sarvam_key) for c in chunks if c.strip()]
     return "\n".join(translated_chunks)
 
 

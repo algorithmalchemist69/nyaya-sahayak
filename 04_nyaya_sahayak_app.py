@@ -3,6 +3,7 @@ Nyaya-Sahayak — Streamlit App
 Run: streamlit run 04_nyaya_sahayak_app.py
 """
 
+import base64
 import os
 import pickle
 
@@ -23,6 +24,8 @@ EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DATABRICKS_HOST = "https://dbc-3f37515c-6bbb.cloud.databricks.com"
 LLM_ENDPOINT    = "databricks-meta-llama-3-1-8b-instruct"
 SARVAM_API_URL  = "https://api.sarvam.ai/translate"
+SARVAM_STT_URL  = "https://api.sarvam.ai/speech-to-text"
+SARVAM_TTS_URL  = "https://api.sarvam.ai/text-to-speech"
 
 # ── Supported Indian languages ────────────────────────────────────────────────
 LANGUAGES = {
@@ -91,7 +94,6 @@ def get_llm_client(token: str):
 # ── Sarvam translation ────────────────────────────────────────────────────────
 
 def _translate_chunk(chunk: str, src: str, tgt: str, sarvam_key: str) -> str:
-    """Translate a single chunk (≤900 chars) via Sarvam AI."""
     response = requests.post(
         SARVAM_API_URL,
         headers={"api-subscription-key": sarvam_key},
@@ -111,11 +113,8 @@ def _translate_chunk(chunk: str, src: str, tgt: str, sarvam_key: str) -> str:
 
 
 def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
-    """Translate text using Sarvam AI, splitting into chunks if needed."""
     if src == tgt or not text.strip():
         return text
-
-    # Split into paragraphs and batch into ≤900-char chunks
     paragraphs = text.split("\n")
     chunks, current = [], ""
     for para in paragraphs:
@@ -127,9 +126,46 @@ def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
             current = (current + "\n" + para) if current else para
     if current:
         chunks.append(current.strip())
-
     translated_chunks = [_translate_chunk(c, src, tgt, sarvam_key) for c in chunks if c]
     return "\n".join(translated_chunks)
+
+
+# ── Sarvam voice ──────────────────────────────────────────────────────────────
+
+def speech_to_text(audio_bytes: bytes, sarvam_key: str) -> str:
+    """Transcribe recorded audio via Sarvam AI (auto-detects language)."""
+    response = requests.post(
+        SARVAM_STT_URL,
+        headers={"api-subscription-key": sarvam_key},
+        files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+        data={"model": "saarika:v2", "language_code": "unknown"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json().get("transcript", "")
+
+
+def text_to_speech(text: str, lang_code: str, sarvam_key: str) -> bytes:
+    """Convert text to speech via Sarvam AI. Returns raw WAV bytes."""
+    response = requests.post(
+        SARVAM_TTS_URL,
+        headers={"api-subscription-key": sarvam_key, "Content-Type": "application/json"},
+        json={
+            "inputs":               [text[:500]],
+            "target_language_code": lang_code,
+            "speaker":              "meera",
+            "pitch":                0,
+            "pace":                 1.0,
+            "loudness":             1.5,
+            "speech_sample_rate":   8000,
+            "enable_preprocessing": True,
+            "model":                "bulbul:v1",
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    audios = response.json().get("audios", [])
+    return base64.b64decode(audios[0]) if audios else b""
 
 
 # ── BhashaBench scoring ───────────────────────────────────────────────────────
@@ -209,7 +245,7 @@ def main():
             "- Apache Spark + Delta Lake\n"
             "- FAISS (semantic retrieval)\n"
             "- Llama 3.1 8B (open-source)\n"
-            "- Sarvam AI (Indian languages)\n\n"
+            "- Sarvam AI (Indian languages + voice)\n\n"
             "**Data**\n"
             "- Bharatiya Nyaya Sanhita, 2023\n"
             "- Synthetic FIR incident dataset"
@@ -220,6 +256,7 @@ def main():
         st.stop()
 
     multilingual = bool(sarvam_key) and lang_choice != "English"
+    voice_enabled = bool(sarvam_key)
     client = get_llm_client(token)
 
     if multilingual:
@@ -230,17 +267,34 @@ def main():
     # ── Tab 1 ─────────────────────────────────────────────────────────────────
     with tab1:
         st.subheader("BNS Explanation")
-        st.write("Paste any BNS or Constitution text and get a plain-English explanation.")
+        st.write("Paste any BNS or Constitution text and get a plain-language explanation.")
+
+        # Voice input
+        voice_legal = None
+        if voice_enabled:
+            voice_legal = st.audio_input("🎙️ Or record the legal text")
 
         legal_input = st.text_area(
             "Legal text",
             placeholder="e.g. Whoever commits theft shall be punished with imprisonment...",
-            height=180,
+            height=150,
         )
 
         if st.button("Simplify ✨"):
-            if not legal_input.strip():
-                st.warning("Please paste some legal text first.")
+            # Resolve input: voice takes priority over typed text
+            final_legal = legal_input.strip()
+            if voice_legal and sarvam_key:
+                with st.spinner("Transcribing voice …"):
+                    try:
+                        transcribed = speech_to_text(voice_legal.read(), sarvam_key)
+                        if transcribed:
+                            final_legal = transcribed
+                            st.caption(f"🎙️ Transcribed: _{transcribed}_")
+                    except Exception as e:
+                        st.warning(f"Voice transcription failed: {e}")
+
+            if not final_legal:
+                st.warning("Please paste or record some legal text first.")
             else:
                 lang_instruction = f"Respond in {lang_choice}." if lang_choice != "English" else ""
                 with st.spinner("Llama 3.1 is thinking …"):
@@ -251,13 +305,25 @@ def main():
                             f"and relatable analogies. End with a one-line "
                             f"'What this means for you' note. {lang_instruction}"
                         ),
-                        user_prompt=f"Explain simply:\n\n{legal_input.strip()}",
+                        user_prompt=f"Explain simply:\n\n{final_legal}",
                         client=client,
                     )
 
                 st.success("Explanation:")
                 st.markdown(result)
 
+                # Voice output
+                if voice_enabled and multilingual:
+                    with st.spinner("Generating voice response …"):
+                        try:
+                            audio_bytes = text_to_speech(result, lang_code, sarvam_key)
+                            if audio_bytes:
+                                st.caption("🔊 Voice output (first ~500 characters)")
+                                st.audio(audio_bytes, format="audio/wav")
+                        except Exception as e:
+                            st.caption(f"Voice output unavailable: {e}")
+
+                # BhashaBench score
                 if multilingual:
                     lang_score, composite, detected = bhasha_bench_score(result, lang_choice)
                     st.subheader("📊 BhashaBench Score")
@@ -296,17 +362,35 @@ def main():
             value="" if choice == "(type your own)" else choice,
             height=110,
         )
+
+        # Voice input
+        voice_incident = None
+        if voice_enabled:
+            voice_incident = st.audio_input("🎙️ Or record your incident")
+
         top_k = st.slider("BNS sections to retrieve", 3, 10, 5)
 
         if st.button("Analyse & Suggest FIR Sections 🔍"):
-            if not incident_input.strip():
-                st.warning("Please describe the incident.")
+            # Resolve input: voice takes priority over typed text
+            final_incident = incident_input.strip()
+            if voice_incident and sarvam_key:
+                with st.spinner("Transcribing voice …"):
+                    try:
+                        transcribed = speech_to_text(voice_incident.read(), sarvam_key)
+                        if transcribed:
+                            final_incident = transcribed
+                            st.caption(f"🎙️ Transcribed: _{transcribed}_")
+                    except Exception as e:
+                        st.warning(f"Voice transcription failed: {e}")
+
+            if not final_incident:
+                st.warning("Please describe or record the incident.")
             else:
-                # Sarvam translates only the short user input to English for FAISS
-                english_input = incident_input.strip()
+                # Translate to English for FAISS
+                english_input = final_incident
                 if multilingual:
                     with st.spinner(f"Translating from {lang_choice} to English via Sarvam …"):
-                        english_input = translate(incident_input.strip(), lang_code, "en-IN", sarvam_key)
+                        english_input = translate(final_incident, lang_code, "en-IN", sarvam_key)
                     st.caption(f"Translated input: _{english_input}_")
 
                 with st.spinner("Retrieving BNS sections via FAISS …"):
@@ -347,6 +431,18 @@ def main():
                 st.success("FIR Guidance")
                 st.markdown(guidance)
 
+                # Voice output
+                if voice_enabled and multilingual:
+                    with st.spinner("Generating voice response …"):
+                        try:
+                            audio_bytes = text_to_speech(guidance, lang_code, sarvam_key)
+                            if audio_bytes:
+                                st.caption("🔊 Voice output (first ~500 characters)")
+                                st.audio(audio_bytes, format="audio/wav")
+                        except Exception as e:
+                            st.caption(f"Voice output unavailable: {e}")
+
+                # BhashaBench score
                 if multilingual:
                     lang_score, composite, detected = bhasha_bench_score(guidance, lang_choice)
                     st.subheader("📊 BhashaBench Score")

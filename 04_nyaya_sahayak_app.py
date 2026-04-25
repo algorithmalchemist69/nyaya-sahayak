@@ -134,12 +134,14 @@ def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
 
 def speech_to_text(audio_bytes: bytes, lang_code: str, sarvam_key: str) -> str:
     """Transcribe recorded audio via Sarvam AI."""
-    # Detect container format from magic bytes; let Sarvam infer the codec
-    fname = "audio.wav" if audio_bytes[:4] == b"RIFF" else "audio.webm"
+    if audio_bytes[:4] == b"RIFF":
+        fname, mime = "audio.wav", "audio/wav"
+    else:
+        fname, mime = "audio.webm", "audio/webm"
     response = requests.post(
         SARVAM_STT_URL,
         headers={"api-subscription-key": sarvam_key},
-        files={"file": (fname, audio_bytes)},   # no MIME — server detects
+        files={"file": (fname, audio_bytes, mime)},
         data={"model": "saarika:v2", "language_code": lang_code},
         timeout=30,
     )

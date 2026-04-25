@@ -424,18 +424,13 @@ def main():
                     guidance = call_llm(
                         system_prompt=(
                             f"You are a legal assistant helping Indian citizens file an FIR. "
-                            f"Step 1: Identify the offense type from the incident using common sense. "
-                            f"Step 2: Pick only the retrieved BNS sections that genuinely match — "
-                            f"ignore clearly unrelated ones. If none fit, use the offense reference list. "
-                            f"Step 3: State each applicable BNS section NUMBER and name explicitly, "
-                            f"then explain in simple words why it applies. "
-                            f"Step 4: Give clear next steps (what to bring to police station, etc.). "
-                            f"Always mention at least one specific BNS section number. "
+                            f"Identify the offense type, list relevant BNS sections, explain "
+                            f"why each applies in plain language, and advise what to do next. "
                             f"Be empathetic and clear. {lang_instruction}"
                         ),
                         user_prompt=(
                             f"Incident: {english_input}\n\n"
-                            f"Retrieved BNS sections (may include irrelevant ones — use judgment):\n{sections_text}\n\n"
+                            f"Retrieved BNS sections:\n{sections_text}\n\n"
                             f"Offense type reference:\n{offense_list}"
                         ),
                         client=client,

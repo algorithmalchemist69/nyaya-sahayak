@@ -133,20 +133,18 @@ def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
 # ── Sarvam voice ──────────────────────────────────────────────────────────────
 
 def speech_to_text(audio_bytes: bytes, lang_code: str, sarvam_key: str) -> str:
-    """Transcribe recorded audio via Sarvam AI. Auto-detects WAV vs WebM."""
-    # Browsers record WebM/Opus; detect from magic bytes
-    if audio_bytes[:4] == b"RIFF":
-        fname, mime = "audio.wav", "audio/wav"
-    else:
-        fname, mime = "audio.webm", "audio/webm"
+    """Transcribe recorded audio via Sarvam AI."""
+    # Detect container format from magic bytes; let Sarvam infer the codec
+    fname = "audio.wav" if audio_bytes[:4] == b"RIFF" else "audio.webm"
     response = requests.post(
         SARVAM_STT_URL,
         headers={"api-subscription-key": sarvam_key},
-        files={"file": (fname, audio_bytes, mime)},
+        files={"file": (fname, audio_bytes)},   # no MIME — server detects
         data={"model": "saarika:v2", "language_code": lang_code},
         timeout=30,
     )
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(f"Sarvam STT {response.status_code}: {response.text}")
     return response.json().get("transcript", "")
 
 
@@ -296,7 +294,7 @@ def main():
                             final_legal = transcribed
                             st.caption(f"🎙️ Transcribed: _{transcribed}_")
                     except Exception as e:
-                        st.warning(f"Voice transcription failed: {e}")
+                        st.warning(f"Voice transcription failed — {e}")
 
             if not final_legal:
                 st.warning("Please paste or record some legal text first.")
@@ -379,14 +377,17 @@ def main():
             # Resolve input: voice takes priority over typed text
             final_incident = incident_input.strip()
             if voice_incident and sarvam_key:
+                raw = voice_incident.read()
+                with st.expander("🔍 Audio debug info", expanded=False):
+                    st.write(f"Size: {len(raw)} bytes | First 4 bytes: {raw[:4].hex()} | Detected as: {'WAV' if raw[:4]==b'RIFF' else 'WebM/other'}")
                 with st.spinner("Transcribing voice …"):
                     try:
-                        transcribed = speech_to_text(voice_incident.read(), lang_code, sarvam_key)
+                        transcribed = speech_to_text(raw, lang_code, sarvam_key)
                         if transcribed:
                             final_incident = transcribed
                             st.caption(f"🎙️ Transcribed: _{transcribed}_")
                     except Exception as e:
-                        st.warning(f"Voice transcription failed: {e}")
+                        st.warning(f"Voice transcription failed — {e}")
 
             if not final_incident:
                 st.warning("Please describe or record the incident.")

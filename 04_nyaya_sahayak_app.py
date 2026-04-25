@@ -164,11 +164,12 @@ def text_to_speech(text: str, lang_code: str, sarvam_key: str) -> bytes:
             "loudness":             1.5,
             "speech_sample_rate":   8000,
             "enable_preprocessing": True,
-            "model":                "bulbul:v1",
+            "model":                "bulbul:v2",
         },
         timeout=60,
     )
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(f"Sarvam TTS {response.status_code}: {response.text}")
     audios = response.json().get("audios", [])
     return base64.b64decode(audios[0]) if audios else b""
 
@@ -423,13 +424,18 @@ def main():
                     guidance = call_llm(
                         system_prompt=(
                             f"You are a legal assistant helping Indian citizens file an FIR. "
-                            f"Identify the offense type, list relevant BNS sections, explain "
-                            f"why each applies in plain language, and advise what to do next. "
-                            f"Be empathetic and clear. {lang_instruction}"
+                            f"Step 1: Read the incident and determine the most likely offense type "
+                            f"(theft, assault, fraud, etc.) based on common sense — ignore retrieved "
+                            f"sections that are clearly unrelated to the incident. "
+                            f"Step 2: From the retrieved BNS sections, pick only the ones that "
+                            f"genuinely apply. If none fit, use the offense reference list instead. "
+                            f"Step 3: Explain each applicable section in plain language. "
+                            f"Step 4: Advise the person on what to do next (go to police station, "
+                            f"bring documents, etc.). Be empathetic and clear. {lang_instruction}"
                         ),
                         user_prompt=(
                             f"Incident: {english_input}\n\n"
-                            f"Retrieved BNS sections:\n{sections_text}\n\n"
+                            f"Retrieved BNS sections (may include irrelevant ones — use judgment):\n{sections_text}\n\n"
                             f"Offense type reference:\n{offense_list}"
                         ),
                         client=client,

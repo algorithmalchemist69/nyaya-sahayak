@@ -211,7 +211,7 @@ def text_to_speech(text: str, lang_code: str, key: str) -> str:
                 "loudness":             1.5,
                 "speech_sample_rate":   8000,
                 "enable_preprocessing": True,
-                "model":                "bulbul:v1",
+                "model":                "bulbul:v2",
             },
             timeout=60,
         )
@@ -368,13 +368,18 @@ offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 guidance = call_llm(
     system_prompt=(
         f"You are a legal assistant helping Indian citizens file an FIR. "
-        f"Identify the offense type, list relevant BNS sections, explain why each applies "
-        f"in plain language, and advise what to do next. Be empathetic and clear. "
-        f"{lang_instruction}"
+        f"Step 1: Read the incident and determine the most likely offense type "
+        f"(theft, assault, fraud, etc.) based on common sense — ignore retrieved "
+        f"sections that are clearly unrelated to the incident. "
+        f"Step 2: From the retrieved BNS sections, pick only the ones that "
+        f"genuinely apply. If none fit, use the offense reference list instead. "
+        f"Step 3: Explain each applicable section in plain language. "
+        f"Step 4: Advise the person on what to do next (go to police station, "
+        f"bring documents, etc.). Be empathetic and clear. {lang_instruction}"
     ),
     user_prompt=(
         f"Incident: {english_incident}\n\n"
-        f"Retrieved BNS sections:\n{sections_text}\n\n"
+        f"Retrieved BNS sections (may include irrelevant ones — use judgment):\n{sections_text}\n\n"
         f"Offense type reference:\n{offense_list}"
     ),
     max_tokens=1200,

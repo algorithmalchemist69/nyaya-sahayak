@@ -166,31 +166,18 @@ def translate_input(text: str, src: str, key: str) -> str:
     return translate_text(text, src, "en-IN", key)
 
 
-def bhasha_bench_score(output: str, lang_name: str, lang_code: str,
-                       english_ref: str, sarvam_key: str) -> dict:
+def bhasha_bench_score(text: str, lang_name: str) -> dict:
     """Compute BhashaBench metrics for a non-English LLM output."""
     expected = LANGDETECT_CODES.get(lang_name, "")
     try:
-        detected = detect(output)
+        detected = detect(text)
         lang_score = 1.0 if detected == expected else 0.0
     except LangDetectException:
         detected = "unknown"
         lang_score = 0.0
-
-    try:
-        back_en = translate_text(output, lang_code, "en-IN", sarvam_key)
-        v_ref  = embed_model.encode([english_ref], normalize_embeddings=True).astype(np.float32)
-        v_back = embed_model.encode([back_en],     normalize_embeddings=True).astype(np.float32)
-        sem_score = float(np.dot(v_ref, v_back.T).squeeze())
-        sem_score = max(0.0, min(1.0, sem_score))
-    except Exception as e:
-        print(f"Semantic scoring error: {e}")
-        sem_score = 0.0
-
-    composite = round((0.5 * lang_score + 0.5 * sem_score) * 100, 1)
+    composite = round(lang_score * 100)
     return {
-        "language_detection": round(lang_score * 100),
-        "semantic_fidelity":  round(sem_score * 100, 1),
+        "language_detection": composite,
         "composite":          composite,
         "detected_lang":      detected,
         "expected_lang":      expected,
@@ -236,26 +223,22 @@ simplified = call_llm(
 )
 
 bb1 = {}
-if lang_name != "English" and sarvam_key:
-    bb1 = bhasha_bench_score(simplified, lang_name, lang_code, legal_text, sarvam_key)
+if lang_name != "English":
+    bb1 = bhasha_bench_score(simplified, lang_name)
 
 bb1_html = ""
 if bb1:
     bb1_html = f"""
   <hr style="border:none;border-top:1px solid #c5d8f8;margin:16px 0;"/>
-  <h4 style="color:#1976d2;margin:0 0 10px;">📊 BhashaBench Score</h4>
+  <h4 style="color:#1976d2;margin:0 0 10px;">&#128202; BhashaBench Score</h4>
   <div style="display:flex;gap:16px;">
     <div style="background:#e3f2fd;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
       <div style="font-size:22px;font-weight:bold;color:#1565c0;">{bb1['language_detection']} / 100</div>
-      <div style="font-size:12px;color:#555;margin-top:4px;">Language Detection<br/><small>detected: {bb1['detected_lang']} · expected: {bb1['expected_lang']}</small></div>
-    </div>
-    <div style="background:#e3f2fd;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
-      <div style="font-size:22px;font-weight:bold;color:#1565c0;">{bb1['semantic_fidelity']} / 100</div>
-      <div style="font-size:12px;color:#555;margin-top:4px;">Semantic Fidelity<br/><small>round-trip cosine similarity</small></div>
+      <div style="font-size:12px;color:#555;margin-top:4px;">Language Detection<br/><small>detected: {bb1['detected_lang']} &middot; expected: {bb1['expected_lang']}</small></div>
     </div>
     <div style="background:#1976d2;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
       <div style="font-size:22px;font-weight:bold;color:#fff;">{bb1['composite']} / 100</div>
-      <div style="font-size:12px;color:#bbdefb;margin-top:4px;">BhashaBench Score<br/><small>composite (50% + 50%)</small></div>
+      <div style="font-size:12px;color:#bbdefb;margin-top:4px;">BhashaBench Score<br/><small>language detection based</small></div>
     </div>
   </div>
 """
@@ -315,27 +298,22 @@ retrieved_html = "".join(
 )
 
 bb2 = {}
-if lang_name != "English" and sarvam_key:
-    english_ref2 = f"Incident: {english_incident}\n\n{sections_text}"
-    bb2 = bhasha_bench_score(guidance, lang_name, lang_code, english_ref2, sarvam_key)
+if lang_name != "English":
+    bb2 = bhasha_bench_score(guidance, lang_name)
 
 bb2_html = ""
 if bb2:
     bb2_html = f"""
   <hr style="border:none;border-top:1px solid #c8e6c9;margin:16px 0;"/>
-  <h4 style="color:#388e3c;margin:0 0 10px;">📊 BhashaBench Score</h4>
+  <h4 style="color:#388e3c;margin:0 0 10px;">&#128202; BhashaBench Score</h4>
   <div style="display:flex;gap:16px;">
     <div style="background:#f1f8e9;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
       <div style="font-size:22px;font-weight:bold;color:#2e7d32;">{bb2['language_detection']} / 100</div>
-      <div style="font-size:12px;color:#555;margin-top:4px;">Language Detection<br/><small>detected: {bb2['detected_lang']} · expected: {bb2['expected_lang']}</small></div>
-    </div>
-    <div style="background:#f1f8e9;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
-      <div style="font-size:22px;font-weight:bold;color:#2e7d32;">{bb2['semantic_fidelity']} / 100</div>
-      <div style="font-size:12px;color:#555;margin-top:4px;">Semantic Fidelity<br/><small>round-trip cosine similarity</small></div>
+      <div style="font-size:12px;color:#555;margin-top:4px;">Language Detection<br/><small>detected: {bb2['detected_lang']} &middot; expected: {bb2['expected_lang']}</small></div>
     </div>
     <div style="background:#388e3c;padding:12px 20px;border-radius:8px;text-align:center;flex:1;">
       <div style="font-size:22px;font-weight:bold;color:#fff;">{bb2['composite']} / 100</div>
-      <div style="font-size:12px;color:#c8e6c9;margin-top:4px;">BhashaBench Score<br/><small>composite (50% + 50%)</small></div>
+      <div style="font-size:12px;color:#c8e6c9;margin-top:4px;">BhashaBench Score<br/><small>language detection based</small></div>
     </div>
   </div>
 """

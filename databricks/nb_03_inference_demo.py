@@ -277,18 +277,16 @@ if stt_path.strip() and sarvam_key:
         print(f"STT transcription: {transcribed}")
         legal_text = transcribed
 
+lang_instruction = f"Respond in {lang_name}." if lang_name != "English" else ""
+
 simplified = call_llm(
     system_prompt=(
-        "You are a friendly legal expert explaining Indian law (BNS/Constitution) "
-        "to a 15-year-old. Use short sentences, everyday words, and relatable analogies. "
-        "End with a one-line 'What this means for you' note. Always respond in English."
+        f"You are a friendly legal expert explaining Indian law (BNS/Constitution) "
+        f"to a 15-year-old. Use short sentences, everyday words, and relatable analogies. "
+        f"End with a one-line 'What this means for you' note. {lang_instruction}"
     ),
     user_prompt=f"Explain simply:\n\n{legal_text}",
 )
-
-# Translate LLM output to user's language via Sarvam (better quality than asking LLM)
-if lang_name != "English" and sarvam_key:
-    simplified = translate_text(simplified, "en-IN", lang_code, sarvam_key)
 
 # Voice output
 audio_b64_1 = ""
@@ -369,15 +367,15 @@ offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 
 guidance = call_llm(
     system_prompt=(
-        "You are a legal assistant helping Indian citizens file an FIR. "
-        "Step 1: Identify the offense type from the incident using common sense. "
-        "Step 2: Pick only the retrieved BNS sections that genuinely match — "
-        "ignore clearly unrelated ones. If none fit, use the offense reference list. "
-        "Step 3: State each applicable BNS section NUMBER and name explicitly, "
-        "then explain in simple words why it applies. "
-        "Step 4: Give clear next steps (what to bring to police station, etc.). "
-        "Always mention at least one specific BNS section number. "
-        "Be empathetic and clear. Always respond in English."
+        f"You are a legal assistant helping Indian citizens file an FIR. "
+        f"Step 1: Identify the offense type from the incident using common sense. "
+        f"Step 2: Pick only the retrieved BNS sections that genuinely match — "
+        f"ignore clearly unrelated ones. If none fit, use the offense reference list. "
+        f"Step 3: State each applicable BNS section NUMBER and name explicitly, "
+        f"then explain in simple words why it applies. "
+        f"Step 4: Give clear next steps (what to bring to police station, etc.). "
+        f"Always mention at least one specific BNS section number. "
+        f"Be empathetic and clear. {lang_instruction}"
     ),
     user_prompt=(
         f"Incident: {english_incident}\n\n"
@@ -386,10 +384,6 @@ guidance = call_llm(
     ),
     max_tokens=1200,
 )
-
-# Translate LLM output to user's language via Sarvam (better quality than asking LLM)
-if lang_name != "English" and sarvam_key:
-    guidance = translate_text(guidance, "en-IN", lang_code, sarvam_key)
 
 # Voice output
 audio_b64_2 = ""

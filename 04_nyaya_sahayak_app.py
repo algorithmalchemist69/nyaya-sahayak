@@ -302,21 +302,18 @@ def main():
             if not final_legal:
                 st.warning("Please paste or record some legal text first.")
             else:
+                lang_instruction = f"Respond in {lang_choice}." if lang_choice != "English" else ""
                 with st.spinner("Llama 3.1 is thinking …"):
                     result = call_llm(
                         system_prompt=(
-                            "You are a friendly legal expert explaining Indian law "
-                            "to a 15-year-old. Use short sentences, everyday words, "
-                            "and relatable analogies. End with a one-line "
-                            "'What this means for you' note. Always respond in English."
+                            f"You are a friendly legal expert explaining Indian law "
+                            f"to a 15-year-old. Use short sentences, everyday words, "
+                            f"and relatable analogies. End with a one-line "
+                            f"'What this means for you' note. {lang_instruction}"
                         ),
                         user_prompt=f"Explain simply:\n\n{final_legal}",
                         client=client,
                     )
-
-                if multilingual:
-                    with st.spinner(f"Translating explanation to {lang_choice} via Sarvam …"):
-                        result = translate(result, "en-IN", lang_code, sarvam_key)
 
                 st.success("Explanation:")
                 st.markdown(result)
@@ -422,18 +419,19 @@ def main():
                 )
                 offense_list = "\n".join(f"- {k}: {v}" for k, v in OFFENSE_HINTS.items())
 
+                lang_instruction = f"Respond in {lang_choice}." if lang_choice != "English" else ""
                 with st.spinner("Llama 3.1 is generating FIR guidance …"):
                     guidance = call_llm(
                         system_prompt=(
-                            "You are a legal assistant helping Indian citizens file an FIR. "
-                            "Step 1: Identify the offense type from the incident using common sense. "
-                            "Step 2: Pick only the retrieved BNS sections that genuinely match — "
-                            "ignore clearly unrelated ones. If none fit, use the offense reference list. "
-                            "Step 3: State each applicable BNS section NUMBER and name explicitly, "
-                            "then explain in simple words why it applies. "
-                            "Step 4: Give clear next steps (what to bring to police station, etc.). "
-                            "Always mention at least one specific BNS section number. "
-                            "Be empathetic and clear. Always respond in English."
+                            f"You are a legal assistant helping Indian citizens file an FIR. "
+                            f"Step 1: Identify the offense type from the incident using common sense. "
+                            f"Step 2: Pick only the retrieved BNS sections that genuinely match — "
+                            f"ignore clearly unrelated ones. If none fit, use the offense reference list. "
+                            f"Step 3: State each applicable BNS section NUMBER and name explicitly, "
+                            f"then explain in simple words why it applies. "
+                            f"Step 4: Give clear next steps (what to bring to police station, etc.). "
+                            f"Always mention at least one specific BNS section number. "
+                            f"Be empathetic and clear. {lang_instruction}"
                         ),
                         user_prompt=(
                             f"Incident: {english_input}\n\n"
@@ -443,10 +441,6 @@ def main():
                         client=client,
                         max_tokens=1200,
                     )
-
-                if multilingual:
-                    with st.spinner(f"Translating guidance to {lang_choice} via Sarvam …"):
-                        guidance = translate(guidance, "en-IN", lang_code, sarvam_key)
 
                 st.success("FIR Guidance")
                 st.markdown(guidance)

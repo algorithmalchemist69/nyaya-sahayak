@@ -9,8 +9,14 @@ command:
   - --server.headless=true
 
 env:
-  - name: ANTHROPIC_API_KEY
+  - name: DATABRICKS_TOKEN
     valueFrom:
       secretRef:
-        scope: nyaya                    # Databricks secret scope
-        key:   anthropic_api_key        # Secret key name
+        scope: nyaya
+        key: databricks_token
+
+  - name: SARVAM_API_KEY
+    valueFrom:
+      secretRef:
+        scope: nyaya
+        key: sarvam_api_key

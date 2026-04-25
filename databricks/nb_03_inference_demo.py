@@ -184,7 +184,7 @@ def speech_to_text(file_path: str, lang_code: str, key: str) -> str:
             SARVAM_STT_URL,
             headers={"api-subscription-key": key},
             files={"file": (fname, audio_bytes, mime)},
-            data={"model": "saarika:v2", "language_code": lang_code},
+            data={"model": "saarika:v2.5", "language_code": lang_code},
             timeout=30,
         )
         r.raise_for_status()

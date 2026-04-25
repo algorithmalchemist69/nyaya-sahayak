@@ -224,7 +224,7 @@ def text_to_speech(text: str, lang_code: str, sarvam_key: str) -> bytes:
         SARVAM_TTS_URL,
         headers={"api-subscription-key": sarvam_key, "Content-Type": "application/json"},
         json={
-            "inputs":               chunks[:6],
+            "inputs":               chunks[:3],
             "target_language_code": lang_code,
             "speaker":              "anushka",
             "pitch":                0,

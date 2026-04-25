@@ -133,11 +133,16 @@ def translate(text: str, src: str, tgt: str, sarvam_key: str) -> str:
 # ── Sarvam voice ──────────────────────────────────────────────────────────────
 
 def speech_to_text(audio_bytes: bytes, lang_code: str, sarvam_key: str) -> str:
-    """Transcribe recorded audio via Sarvam AI."""
+    """Transcribe recorded audio via Sarvam AI. Auto-detects WAV vs WebM."""
+    # Browsers record WebM/Opus; detect from magic bytes
+    if audio_bytes[:4] == b"RIFF":
+        fname, mime = "audio.wav", "audio/wav"
+    else:
+        fname, mime = "audio.webm", "audio/webm"
     response = requests.post(
         SARVAM_STT_URL,
         headers={"api-subscription-key": sarvam_key},
-        files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+        files={"file": (fname, audio_bytes, mime)},
         data={"model": "saarika:v2", "language_code": lang_code},
         timeout=30,
     )
@@ -256,7 +261,7 @@ def main():
         st.stop()
 
     multilingual = bool(sarvam_key) and lang_choice != "English"
-    voice_enabled = bool(sarvam_key)
+    voice_enabled = multilingual  # voice only for non-English Indian languages
     client = get_llm_client(token)
 
     if multilingual:

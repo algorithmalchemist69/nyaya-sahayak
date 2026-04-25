@@ -178,10 +178,12 @@ def speech_to_text(file_path: str, lang_code: str, key: str) -> str:
     try:
         with open(file_path, "rb") as f:
             audio_bytes = f.read()
+        fname = file_path.split("/")[-1]
+        mime  = "audio/wav" if audio_bytes[:4] == b"RIFF" else "audio/webm"
         r = requests.post(
             SARVAM_STT_URL,
             headers={"api-subscription-key": key},
-            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            files={"file": (fname, audio_bytes, mime)},
             data={"model": "saarika:v2", "language_code": lang_code},
             timeout=30,
         )
